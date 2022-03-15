@@ -39,6 +39,8 @@ func main() {
 
 // GetAPIData 获取 TIKTOK API 接口数据.
 func GetAPIData(api string, body string, header *http.Header, page int) (int, error) {
+	t := time.Now()
+	tm1 := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
 	var data []configs.FaStarsModel
 	for {
 		// 请求接口
@@ -77,6 +79,7 @@ func GetAPIData(api string, body string, header *http.Header, page int) (int, er
 			if profile.Contact.CountryCodes != nil {
 				CountryCodes = profile.Contact.CountryCodes[0]
 			}
+
 			// --------------- 字段处理 结束 ---------------
 			data = append(data, configs.FaStarsModel{
 				CreatorId:                creatorId,
@@ -99,8 +102,8 @@ func GetAPIData(api string, body string, header *http.Header, page int) (int, er
 				VideoAvgViewCnt:          profile.VideoAvgViewCnt,
 				VideoPubCnt:              profile.VideoPubCnt,
 				ProductCnt:               profile.ProductCnt,
-				Createtime:               time.Now().Unix(),
-				Updatetime:               time.Now().Unix(),
+				Createtime:               tm1.Unix(),
+				Updatetime:               tm1.Unix(),
 			})
 		}
 		// 没有下一页了就跳出循环，有的话就继续找下一页，出错了直接 return 不会走到这里
