@@ -43,7 +43,7 @@ func GetAPIData(api string, body string, header *http.Header, page int) (int, er
 	for {
 		// 请求接口
 		bodyTemp := fmt.Sprintf(body, page)
-		fmt.Printf("正在采集第 %d 页.\napi: %s\nbody: %s\n\n", page+1, api, bodyTemp)
+		log.Printf("Currently collecting page %d...\napi: %s\nbody: %s\n\n", page+1, api, bodyTemp)
 		bytes, err := Fetcher(http.MethodPost, api, bodyTemp, header)
 		if err != nil {
 			return 0, err
