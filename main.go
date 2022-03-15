@@ -42,9 +42,8 @@ func GetAPIData(api string, body string, header *http.Header, page int) (int, er
 	var data []configs.FaStarsModel
 	for {
 		// 请求接口
-		bodyTemp := fmt.Sprintf(body, page)
-		log.Printf("Currently collecting page %d...\napi: %s\nbody: %s\n\n", page+1, api, bodyTemp)
-		bytes, err := Fetcher(http.MethodPost, api, bodyTemp, header)
+		log.Printf("Currently collecting page %d...\n", page+1)
+		bytes, err := Fetcher(http.MethodPost, api, fmt.Sprintf(body, page), header)
 		if err != nil {
 			return 0, err
 		}
@@ -113,7 +112,7 @@ func GetAPIData(api string, body string, header *http.Header, page int) (int, er
 	table := config.GetString("mysql.table")
 	tx := bootstrap.DB.Table(table).Create(data)
 	if tx.Error != nil {
-		return int(tx.RowsAffected), fmt.Errorf("inserts failed, error message: %s", tx.Error)
+		return int(tx.RowsAffected), fmt.Errorf("error! inserts failed, error message: %v", tx.Error)
 	}
 	return int(tx.RowsAffected), nil
 }
