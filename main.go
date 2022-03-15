@@ -5,52 +5,17 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"tiktok/bootstrap"
+	configs "tiktok/config"
 	"tiktok/pkg/config"
+	"time"
 )
-
-type JsonBody struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-	Data    struct {
-		Profiles []struct {
-			CreatorID       string `json:"creator_id"`
-			CreatorName     string `json:"creator_name"`
-			CreatorNickname string `json:"creator_nickname"`
-			Avatar          struct {
-				ThumbURLList []string `json:"thumb_url_list"`
-				URLList      []string `json:"url_list"`
-			} `json:"avatar"`
-			IsVerified bool   `json:"is_verified"`
-			Region     string `json:"region"`
-			Contact    struct {
-				Emails       []string `json:"emails"`
-				Whatsapps    []string `json:"whatsapps"`
-				CountryCodes []string `json:"country_codes"`
-			} `json:"contact"`
-			ProductCategories        []string `json:"product_categories"`
-			FollowerCnt              int      `json:"follower_cnt"`
-			FollowerTopGender        int      `json:"follower_top_gender"`
-			FollowerTopGenderShare   string   `json:"follower_top_gender_share"`
-			FollowerTopAgeGroup      int      `json:"follower_top_age_group"`
-			FollowerTopAgeGroupShare string   `json:"follower_top_age_group_share"`
-			VideoAvgViewCnt          int      `json:"video_avg_view_cnt"`
-			VideoPubCnt              int      `json:"video_pub_cnt"`
-			ProductCnt               int      `json:"product_cnt"`
-		} `json:"profiles"`
-		NextPagination struct {
-			HasMore   bool   `json:"has_more"`
-			NextPage  int    `json:"next_page"`
-			TotalPage int    `json:"total_page"`
-			Total     int    `json:"total"`
-			SearchKey string `json:"search_key"`
-		} `json:"next_pagination"`
-	} `json:"data"`
-}
 
 // main 入口程序.
 func main() {
@@ -61,36 +26,96 @@ func main() {
 
 	header := &http.Header{}
 	header.Add("cookie", cookie)
-	GetApiData(api, body, header, 0)
+	rows, err := GetAPIData(api, body, header, 0)
+	if err != nil {
+		log.Println(err)
+	}
+	log.Printf("Affects %d rows of data\n", rows)
+
+	fmt.Printf("Press any key to exit...")
+	b := make([]byte, 1)
+	os.Stdin.Read(b)
 }
 
-// GetApiData 获取 TIKTOK API 接口数据.
-func GetApiData(api string, body string, header *http.Header, page int) error {
-	// 请求接口
-	api = fmt.Sprintf(api, page)
-	bytes, err := Fetcher(http.MethodPost, api, body, header)
-	if err != nil {
-		return err
+// GetAPIData 获取 TIKTOK API 接口数据.
+func GetAPIData(api string, body string, header *http.Header, page int) (int, error) {
+	var data []configs.FaStarsModel
+	for {
+		// 请求接口
+		bodyTemp := fmt.Sprintf(body, page)
+		fmt.Printf("正在采集第 %d 页.\napi: %s\nbody: %s\n\n", page+1, api, bodyTemp)
+		bytes, err := Fetcher(http.MethodPost, api, bodyTemp, header)
+		if err != nil {
+			return 0, err
+		}
+		// 解析 Json
+		respBody := configs.JSONBody{}
+		err = json.Unmarshal(bytes, &respBody)
+		if err != nil {
+			return 0, err
+		}
+		if respBody.Message != "success" {
+			return 0, fmt.Errorf("request failed, unintended message: %s", respBody.Message)
+		}
+		// 插入到数据库
+		for _, profile := range respBody.Data.Profiles {
+			// --------------- 字段处理 开始 ---------------
+			// 用户ID
+			creatorId, _ := strconv.ParseUint(profile.CreatorID, 10, 64)
+			// 用户已验证
+			isVerified := 0
+			if profile.IsVerified {
+				isVerified = 1
+			}
+			// 联系方式
+			var email, whatsapps, CountryCodes string
+			if profile.Contact.Emails != nil {
+				email = profile.Contact.Emails[0]
+			}
+			if profile.Contact.Whatsapps != nil {
+				whatsapps = profile.Contact.Whatsapps[0]
+			}
+			if profile.Contact.CountryCodes != nil {
+				CountryCodes = profile.Contact.CountryCodes[0]
+			}
+			// --------------- 字段处理 结束 ---------------
+			data = append(data, configs.FaStarsModel{
+				CreatorId:                creatorId,
+				CreatorName:              profile.CreatorName,
+				CreatorNickname:          profile.CreatorNickname,
+				ContactMails:             email,
+				ContactWhatsapps:         whatsapps,
+				ContactCountryCodes:      CountryCodes,
+				Avatar:                   profile.Avatar.URLList[0],
+				IsVerified:               isVerified,
+				Region:                   profile.Region,
+				ProductCategories:        strings.Join(profile.ProductCategories, ","),
+				Whatsappswitch:           0,
+				Mailswitch:               0,
+				FollowerCnt:              profile.FollowerCnt,
+				FollowerTopGender:        profile.FollowerTopGender,
+				FollowerTopGenderShare:   profile.FollowerTopGenderShare,
+				FollowerTopAgeGroup:      profile.FollowerTopAgeGroup,
+				FollowerTopAgeGroupShare: profile.FollowerTopAgeGroupShare,
+				VideoAvgViewCnt:          profile.VideoAvgViewCnt,
+				VideoPubCnt:              profile.VideoPubCnt,
+				ProductCnt:               profile.ProductCnt,
+				Createtime:               time.Now().Unix(),
+				Updatetime:               time.Now().Unix(),
+			})
+		}
+		// 没有下一页了就跳出循环，有的话就继续找下一页，出错了直接 return 不会走到这里
+		if !respBody.Data.NextPagination.HasMore {
+			break
+		}
+		page++
 	}
-	// 解析 Json
-	respBody := JsonBody{}
-	err = json.Unmarshal(bytes, &respBody)
-	if err != nil {
-		return err
+	table := config.GetString("mysql.table")
+	tx := bootstrap.DB.Table(table).Create(data)
+	if tx.Error != nil {
+		return int(tx.RowsAffected), fmt.Errorf("inserts failed, error message: %s", tx.Error)
 	}
-	if respBody.Message != "success" {
-		return fmt.Errorf("request failed, unintended message: %s", respBody.Message)
-	}
-	for _, profile := range respBody.Data.Profiles {
-		fmt.Println(profile)
-	}
-
-	// 递归函数
-	if respBody.Data.NextPagination.HasMore {
-		return GetApiData(api, body, header, page+1)
-	}
-
-	return nil
+	return int(tx.RowsAffected), nil
 }
 
 // Fetcher 获取网页内容.
@@ -99,26 +124,31 @@ func Fetcher(method string, api string, body string, header *http.Header) ([]byt
 	if err != nil {
 		return nil, err
 	}
-	header.Add("Host", api)
-	header.Add("Content-Length", strconv.Itoa(len(u.Host)))
-	header.Add("Content-type", "application/json")
-	header.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "+
-		"AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.102 Safari/537.36")
+	if header.Get("Host") != u.Host {
+		header.Add("Host", u.Host)
+		header.Add("Content-Length", strconv.Itoa(len(body)))
+		header.Add("Content-type", "application/json")
+		header.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "+
+			"AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.102 Safari/537.36")
+	}
 	req, err := http.NewRequest(method, api, strings.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
 	req.Header = *header
-	client := http.Client{}
+	client := http.Client{
+		Timeout: 30 * time.Second,
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("request failed, unintended status code: %d", resp.StatusCode)
-	}
 	defer func(Body io.ReadCloser) {
 		_ = Body.Close()
 	}(resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("request failed, unintended status code: %d", resp.StatusCode)
+	}
 	return ioutil.ReadAll(resp.Body)
 }
