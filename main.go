@@ -8,7 +8,6 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"tiktok/bootstrap"
@@ -32,9 +31,11 @@ func main() {
 	}
 	log.Printf("Affects %d rows of data\n", rows)
 
-	fmt.Printf("Press any key to exit...")
-	b := make([]byte, 1)
-	os.Stdin.Read(b)
+	fmt.Printf("The program ends after 10 seconds ...")
+	time.Sleep(10 * time.Second)
+	// fmt.Printf("Press any key to exit...")
+	// b := make([]byte, 1)
+	// os.Stdin.Read(b)
 }
 
 // GetAPIData 获取 TIKTOK API 接口数据.
