@@ -3,15 +3,14 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"tiktok/bootstrap"
 	configs "tiktok/config"
+	"tiktok/fetcher"
 	"tiktok/pkg/config"
 	"time"
 )
@@ -21,10 +20,16 @@ func main() {
 	bootstrap.Setup()
 	api := config.GetString("tiktok.api")
 	body := config.GetString("tiktok.body")
-	cookie := config.GetString("tiktok.cookie")
+	email := config.GetString("tiktok.email")
+	password := config.GetString("tiktok.password")
 
+	_, guard, err := Login(email, password)
+	if err != nil {
+		log.Println(err)
+	}
+	log.Printf("Login successfully! the guard is: %s", guard)
 	header := &http.Header{}
-	header.Add("cookie", cookie)
+	header.Add("cookie", guard)
 	rows, err := GetAPIData(api, body, header, 0)
 	if err != nil {
 		log.Println(err)
@@ -38,6 +43,46 @@ func main() {
 	// os.Stdin.Read(b)
 }
 
+func Login(email string, password string) (userinfo string, guard string, err error) {
+	api := "https://seller.tiktokglobalshop.com/passport/web/user/login"
+	body := map[string]string{
+		"mix_mode":           "1",
+		"aid":                "6556",
+		"language":           "zh",
+		"account_sdk_source": "web",
+		"email":              email,
+		"mobile":             "",
+		"account":            email,
+		"password":           password,
+	}
+	header := &http.Header{}
+	resp, err := fetcher.FormData(http.MethodPost, api, &body, header)
+	if err != nil {
+		return "", "", err
+	}
+	bodyBytes, _ := ioutil.ReadAll(resp.Body)
+	respBody := configs.LoginJSONBody{}
+	_ = json.Unmarshal(bodyBytes, &respBody)
+	if respBody.Message != "success" {
+		return "", "", fmt.Errorf(
+			"login failed, please check if the login API is invalid")
+	}
+
+	// 关闭请求
+	_ = resp.Body.Close()
+
+	// 获取返回的Cookie
+	var respHeader []string
+	respHeaders := resp.Header.Values("Set-Cookie")
+	for _, v := range respHeaders {
+		if !strings.Contains(v, "sid_guard") {
+			continue
+		}
+		respHeader = strings.Split(v, ";")
+	}
+	return string(bodyBytes), respHeader[0], nil
+}
+
 // GetAPIData 获取 TIKTOK API 接口数据.
 func GetAPIData(api string, body string, header *http.Header, page int) (int, error) {
 	t := time.Now()
@@ -46,13 +91,16 @@ func GetAPIData(api string, body string, header *http.Header, page int) (int, er
 	for {
 		// 请求接口
 		log.Printf("Currently collecting page %d...\n", page+1)
-		bytes, err := Fetcher(http.MethodPost, api, fmt.Sprintf(body, page), header)
+		resp, err := fetcher.Json(http.MethodPost, api, fmt.Sprintf(body, page), header)
 		if err != nil {
 			return 0, err
 		}
+		bodyBytes, err := ioutil.ReadAll(resp.Body)
+		// 关闭请求
+		_ = resp.Body.Close()
 		// 解析 Json
-		respBody := configs.JSONBody{}
-		err = json.Unmarshal(bytes, &respBody)
+		respBody := configs.ApiJSONBody{}
+		err = json.Unmarshal(bodyBytes, &respBody)
 		if err != nil {
 			return 0, err
 		}
@@ -116,42 +164,8 @@ func GetAPIData(api string, body string, header *http.Header, page int) (int, er
 	table := config.GetString("mysql.table")
 	tx := bootstrap.DB.Table(table).Create(data)
 	if tx.Error != nil {
-		return int(tx.RowsAffected), fmt.Errorf("error! inserts failed, error message: %v", tx.Error)
+		return int(tx.RowsAffected), fmt.Errorf(
+			"error! inserts failed, error message: %w", tx.Error)
 	}
 	return int(tx.RowsAffected), nil
-}
-
-// Fetcher 获取网页内容.
-func Fetcher(method string, api string, body string, header *http.Header) ([]byte, error) {
-	u, err := url.Parse(api)
-	if err != nil {
-		return nil, err
-	}
-	if header.Get("Host") != u.Host {
-		header.Add("Host", u.Host)
-		header.Add("Content-Length", strconv.Itoa(len(body)))
-		header.Add("Content-type", "application/json")
-		header.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "+
-			"AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.102 Safari/537.36")
-	}
-	req, err := http.NewRequest(method, api, strings.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	req.Header = *header
-	client := http.Client{
-		Timeout: 30 * time.Second,
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer func(Body io.ReadCloser) {
-		_ = Body.Close()
-	}(resp.Body)
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("request failed, unintended status code: %d", resp.StatusCode)
-	}
-	return ioutil.ReadAll(resp.Body)
 }
