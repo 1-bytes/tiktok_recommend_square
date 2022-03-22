@@ -126,6 +126,7 @@ type FaStarsModel struct {
 	VideoAvgViewCnt          int    `gorm:"type:int(11)"`
 	VideoPubCnt              int    `gorm:"type:int(11)"`
 	ProductCnt               int    `gorm:"type:int(11)"`
+	IsFirst                  int    `gorm:"type:(2)"`
 	Createtime               int64  `gorm:"type:int(11)"`
 	Updatetime               int64  `gorm:"type:int(11)"`
 }

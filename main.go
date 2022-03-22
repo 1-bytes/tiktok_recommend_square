@@ -88,6 +88,9 @@ func GetAPIData(api string, body string, header *http.Header, page int) (int, er
 	t := time.Now()
 	tm1 := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
 	var data []configs.FaStarsModel
+	var isFirst int
+	table := config.GetString("mysql.table")
+	db := bootstrap.DB
 	for {
 		// 请求接口
 		log.Printf("Currently collecting page %d...\n", page+1)
@@ -129,6 +132,17 @@ func GetAPIData(api string, body string, header *http.Header, page int) (int, er
 				CountryCodes = profile.Contact.CountryCodes[0]
 			}
 
+			// 是否首次出现该用户
+			var count int64
+			tx := db.Table(table).Where("creator_id = ?", creatorId).Count(&count)
+			if tx.Error != nil {
+				return int(tx.RowsAffected), fmt.Errorf(
+					"error! select failed, error message: %w", tx.Error)
+			}
+			isFirst = 0
+			if count == 0 {
+				isFirst = 1
+			}
 			// --------------- 字段处理 结束 ---------------
 			data = append(data, configs.FaStarsModel{
 				CreatorId:                creatorId,
@@ -151,6 +165,7 @@ func GetAPIData(api string, body string, header *http.Header, page int) (int, er
 				VideoAvgViewCnt:          profile.VideoAvgViewCnt,
 				VideoPubCnt:              profile.VideoPubCnt,
 				ProductCnt:               profile.ProductCnt,
+				IsFirst:                  isFirst,
 				Createtime:               tm1.Unix(),
 				Updatetime:               tm1.Unix(),
 			})
@@ -161,8 +176,7 @@ func GetAPIData(api string, body string, header *http.Header, page int) (int, er
 		}
 		page++
 	}
-	table := config.GetString("mysql.table")
-	tx := bootstrap.DB.Table(table).Create(data)
+	tx := db.Table(table).Create(data)
 	if tx.Error != nil {
 		return int(tx.RowsAffected), fmt.Errorf(
 			"error! inserts failed, error message: %w", tx.Error)
