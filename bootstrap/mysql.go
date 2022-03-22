@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
+	"log"
+	"os"
 	"tiktok/pkg/config"
 	"time"
 )
@@ -38,6 +41,17 @@ func ConnectMySQL(host string, port string, username string, password string, db
 			username, password, host, port, db,
 		),
 	})
-	DB, _ = gorm.Open(cfg, &gorm.Config{})
+	logger := logger.New(
+		log.New(os.Stdout, "\r\n", log.LstdFlags), // io writer
+		logger.Config{
+			SlowThreshold: time.Second, // 慢 SQL 阈值
+			LogLevel:      logger.Warn, // Log level
+			Colorful:      false,       // 禁用彩色打印
+		},
+	)
+
+	DB, _ = gorm.Open(cfg, &gorm.Config{
+		Logger: logger,
+	})
 	return DB
 }
